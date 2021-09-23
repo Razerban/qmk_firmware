@@ -503,12 +503,19 @@ void tracking_test(void)
 }
 #endif
 
-uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t non_dead_physical_rows, bool looking_for_all_zero)
+// This function can return CAPSENSE_DAC_MAX+1 if it can't find an all-zero solution.
+// This function can return -1 if it can't find an all-one solution.
+int16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t non_dead_physical_rows, bool looking_for_all_zero, matrix_row_t *only_these_keys)
 {
-    uint16_t min = 0, max = CAPSENSE_DAC_MAX;
+    int16_t min = 0, max = CAPSENSE_DAC_MAX;
+    if (looking_for_all_zero) {
+        max = CAPSENSE_DAC_MAX + 1;
+    } else {
+        min = -1;
+    }
     while (min < max)
     {
-        uint16_t mid = (min + max) / 2;
+        int16_t mid = (min + max) / 2;
         if (!looking_for_all_zero) {
             mid = (min + max + 1) / 2;
         }
@@ -520,6 +527,7 @@ uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t 
             uint8_t row;
             for (row=0; row < MATRIX_CAPSENSE_ROWS; row++)
             {
+                if ((only_these_keys != NULL) && !(only_these_keys[row] & (((matrix_row_t)1) << col))) continue;
                 if (pgm_read_word(&keymaps[0][row][col]) != KC_NO)
                 {
                     valid_physical_rows |= (((matrix_row_t)1) << CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row)); // convert keymap row to physical row
@@ -566,10 +574,49 @@ uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t 
 #endif
 #endif
 
-uint16_t cal_thresholds[CAPSENSE_CAL_BINS];
+int16_t cal_thresholds[CAPSENSE_CAL_BINS];
 matrix_row_t assigned_to_threshold[CAPSENSE_CAL_BINS][MATRIX_CAPSENSE_ROWS];
-uint16_t cal_tr_allzero;
-uint16_t cal_tr_allone;
+int16_t cal_tr_allzero;
+int16_t cal_tr_allone;
+
+static inline void copy_bin(uint8_t dest, uint8_t source, int16_t *cal_thresholds_min)
+{
+    memcpy(&assigned_to_threshold[dest][0], &assigned_to_threshold[source][0], sizeof(assigned_to_threshold[source]));
+    cal_thresholds[dest] = cal_thresholds[source];
+    cal_thresholds_min[dest] = cal_thresholds_min[source];
+}
+
+static inline void assign_keys_that_are_high_at_threshold_to_bin(int16_t threshold, uint8_t bin, uint8_t non_dead_physical_rows)
+{
+    dac_write_threshold(threshold);
+    dac_write_threshold(threshold); // temporary workaround for the delay after writing the DAC being too low for big jumps
+    for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+        uint8_t counts[MATRIX_CAPSENSE_ROWS] = {0};
+        uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
+        uint8_t j;
+        for (j=0; j<CAPSENSE_CAL_EACHKEY_REPS; j++) {
+            uint8_t data = test_single(physical_col, CAPSENSE_HARDCODED_SAMPLE_TIME, NULL);
+            for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+                uint8_t physical_row = CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row);
+                if (data & (1 << physical_row)) {
+                    counts[row] ++;
+                }
+            }
+        }
+        for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+            if (pgm_read_word(&keymaps[0][row][col]) != KC_NO) {
+                uint8_t physical_row = CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row);
+                if (!(non_dead_physical_rows & (1 << physical_row))) {
+                    continue;
+                }
+                if (counts[row] > CAPSENSE_CAL_EACHKEY_REPS / 2) {
+                    assigned_to_threshold[bin][row] |= (((matrix_row_t)1) << col);
+                }
+            }
+        }
+    }
+}
+
 void calibration(void)
 {
     int8_t i;
@@ -594,52 +641,51 @@ void calibration(void)
         }
         non_dead_physical_rows &= temp;
     }
-    cal_tr_allzero = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true);
-    cal_tr_allone = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false);
-    uint16_t cal_thresholds_max[CAPSENSE_CAL_BINS];
-    uint16_t cal_thresholds_min[CAPSENSE_CAL_BINS];
-    memset(cal_thresholds_max, 0xff, sizeof(cal_thresholds_max));
+    cal_tr_allzero = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true, NULL);
+    cal_tr_allone = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false, NULL);
+    int16_t cal_thresholds_min[CAPSENSE_CAL_BINS];
     memset(cal_thresholds_min, 0xff, sizeof(cal_thresholds_min));
-    uint16_t max = (cal_tr_allzero == 0) ? 0 : (cal_tr_allzero - 1);
-    uint16_t min = cal_tr_allone + 1;
+    int16_t max = cal_tr_allzero;
+    int16_t min = (cal_tr_allone >= CAPSENSE_DAC_MAX) ? CAPSENSE_DAC_MAX : (cal_tr_allone + 1);
     if (max < min) max = min;
     uint16_t d = max - min;
     // Initially cal_thresholds will contain the max signal level value of the bin
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
         cal_thresholds[i] = max - (d * (CAPSENSE_CAL_BINS - 1 - i)) / CAPSENSE_CAL_BINS;
     }
-    uint8_t row;
-    for (row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
-        uint8_t physical_row = CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row);
-        if (!(non_dead_physical_rows & (1 << physical_row))) {
-            continue;
+    for (i=CAPSENSE_CAL_BINS-2; i>=0; i--) {
+        assign_keys_that_are_high_at_threshold_to_bin(cal_thresholds[i], i+1, non_dead_physical_rows);
+
+        for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+            assigned_to_threshold[i][row] |= assigned_to_threshold[i+1][row]; // This is here just to make sure everything is consistent.
         }
-        uint8_t col;
-        for (col = 0; col < MATRIX_COLS; col++) {
+    }
+    // Assign all valid keys to bin 0
+    for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+        uint8_t physical_row = CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row);
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
             if (pgm_read_word(&keymaps[0][row][col]) != KC_NO) {
-                uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
-                uint16_t threshold = measure_middle(physical_col, physical_row, CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_EACHKEY_REPS);
-                uint8_t besti = 0;
-                for (i=CAPSENSE_CAL_BINS-2;i>=0;i--) {
-                    if (threshold > cal_thresholds[i])
-                    {
-                        besti = i + 1;
-                        break;
-                    }
+                if (non_dead_physical_rows & (1 << physical_row)) {
+                    assigned_to_threshold[0][row] |= (((matrix_row_t)1) << col);
                 }
-                assigned_to_threshold[besti][row] |= (((matrix_row_t)1) << col);
-                if ((cal_thresholds_max[besti] == 0xFFFFU) || (cal_thresholds_max[besti] < threshold)) cal_thresholds_max[besti] = threshold;
-                if ((cal_thresholds_min[besti] == 0xFFFFU) || (cal_thresholds_min[besti] > threshold)) cal_thresholds_min[besti] = threshold;
             }
         }
     }
+    // In this step we remove keys from lower bins which are present in higher bins, and we also re-calculate min and max values of each bin:
+    for (i=0; i<CAPSENSE_CAL_BINS; i++) {
+        if (i+1 < CAPSENSE_CAL_BINS) {
+            for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+                assigned_to_threshold[i][row] &= ~assigned_to_threshold[i+1][row];
+            }
+        }
+        cal_thresholds_min[i] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false, &assigned_to_threshold[i][0]);
+        cal_thresholds[i] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true, &assigned_to_threshold[i][0]);
+    }
+
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
         uint16_t bin_signal_level;
-        if ((cal_thresholds_max[i] == 0xFFFFU) || (cal_thresholds_min[i] == 0xFFFFU)) {
-            bin_signal_level = cal_thresholds[i];
-        } else {
-            bin_signal_level = (cal_thresholds_max[i] + cal_thresholds_min[i]) / 2;
-        }
+        bin_signal_level = (cal_thresholds[i] + cal_thresholds_min[i]) / 2;
+        //bin_signal_level = (cal_thresholds[i]); // TODO REMOVE
         #ifdef CAPSENSE_CONDUCTIVE_PLASTIC_IS_PUSHED_DOWN_ON_KEYPRESS
         if ((bin_signal_level + CAPSENSE_CAL_THRESHOLD_OFFSET) > CAPSENSE_DAC_MAX)
         {

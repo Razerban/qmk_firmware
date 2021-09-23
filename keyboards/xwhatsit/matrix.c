@@ -567,14 +567,28 @@ uint16_t cal_tr_allzero;
 uint16_t cal_tr_allone;
 void calibration(void)
 {
+    int8_t i;
     dac_write_threshold(CAPSENSE_DAC_MAX);
     dac_write_threshold(CAPSENSE_DAC_MAX); // temporary workaround for the delay after writing the DAC being too low for big jumps
     dac_write_threshold(CAPSENSE_DAC_MAX); // temporary workaround for the delay after writing the DAC being too low for big jumps
-    uint8_t non_dead_physical_rows = ~read_rows();
+    uint8_t non_dead_physical_rows = 0;
+    for (i=0;i<CAPSENSE_CAL_INIT_REPS;i++)
+    {
+        non_dead_physical_rows |= ~read_rows();
+        wait_us(CAPSENSE_KEYBOARD_SETTLE_TIME_US);
+    }
     dac_write_threshold(0);
     dac_write_threshold(0); // temporary workaround for the delay after writing the DAC being too low for big jumps
     dac_write_threshold(0); // temporary workaround for the delay after writing the DAC being too low for big jumps
-    non_dead_physical_rows &= read_rows();
+    {
+        uint8_t temp = 0;
+        for (i=0;i<CAPSENSE_CAL_INIT_REPS;i++)
+        {
+            temp |= read_rows();
+            wait_us(CAPSENSE_KEYBOARD_SETTLE_TIME_US);
+        }
+        non_dead_physical_rows &= temp;
+    }
     cal_tr_allzero = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true);
     cal_tr_allone = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false);
     uint16_t cal_thresholds_max[CAPSENSE_CAL_BINS];
@@ -585,7 +599,6 @@ void calibration(void)
     uint16_t min = cal_tr_allone + 1;
     if (max < min) max = min;
     uint16_t d = max - min;
-    int8_t i;
     // Initially cal_thresholds will contain the max signal level value of the bin
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
         cal_thresholds[i] = max - (d * (CAPSENSE_CAL_BINS - 1 - i)) / CAPSENSE_CAL_BINS;

@@ -528,22 +528,27 @@ uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t 
             valid_physical_rows &= non_dead_physical_rows;
             uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
             uint8_t i;
+            uint8_t sum = 0;
             for (i=0;i<reps;i++) {
                 if (looking_for_all_zero)
                 {
-                    uint8_t all_zero = (test_single(physical_col, time, NULL) & valid_physical_rows) == 0;
-                    if (!all_zero) {
+                    sum += ((test_single(physical_col, time, NULL) & valid_physical_rows) == 0);
+                    if (i + 1 - sum > reps / 2) { // not all_zero found at least reps / 2 times
                         min = mid + 1;
                         goto next_binary_search;
                     }
                 } else {
-                    uint8_t all_ones = (test_single(physical_col, time, NULL) & valid_physical_rows) == valid_physical_rows;
-                    if (!all_ones) {
+                    sum += ((test_single(physical_col, time, NULL) & valid_physical_rows) == valid_physical_rows);
+                    if (i + 1 - sum > reps / 2) { // not all_ones found at least reps / 2 times
                         max = mid - 1;
                         goto next_binary_search;
                     }
                 }
+                if (sum > reps / 2) { // all_zero/all_ones found at least reps / 2 times
+                    goto check_next_column; // We go to check next column. Condition we're looking for must be true for all columns.
+                }
             }
+            check_next_column:;
         }
         if (looking_for_all_zero) {
             max = mid;

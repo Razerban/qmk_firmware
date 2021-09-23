@@ -585,9 +585,10 @@ void calibration(void)
     uint16_t min = cal_tr_allone + 1;
     if (max < min) max = min;
     uint16_t d = max - min;
-    uint8_t i;
+    int8_t i;
+    // Initially cal_thresholds will contain the max signal level value of the bin
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
-        cal_thresholds[i] = min + (d * (2 * i + 1)) / 2 / CAPSENSE_CAL_BINS;
+        cal_thresholds[i] = max - (d * (CAPSENSE_CAL_BINS - 1 - i)) / CAPSENSE_CAL_BINS;
     }
     uint8_t row;
     for (row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
@@ -601,13 +602,11 @@ void calibration(void)
                 uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
                 uint16_t threshold = measure_middle(physical_col, physical_row, CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_EACHKEY_REPS);
                 uint8_t besti = 0;
-                uint16_t best_diff = (uint16_t)abs(threshold - cal_thresholds[besti]);
-                for (i=1;i<CAPSENSE_CAL_BINS;i++) {
-                    uint16_t this_diff = (uint16_t)abs(threshold - cal_thresholds[i]);
-                    if (this_diff < best_diff)
+                for (i=CAPSENSE_CAL_BINS-2;i>=0;i--) {
+                    if (threshold > cal_thresholds[i])
                     {
-                        best_diff = this_diff;
-                        besti = i;
+                        besti = i + 1;
+                        break;
                     }
                 }
                 assigned_to_threshold[besti][row] |= (((matrix_row_t)1) << col);

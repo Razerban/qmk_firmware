@@ -45,7 +45,7 @@ pin 4 = HEADER4 = RXI        = PD2
 pin 5 = HEADER2 = D(igital)7 = PE6
 */
 
-static inline uint8_t read_rows(void)
+static uint8_t read_rows(void)
 {
     CAPSENSE_READ_ROWS_LOCAL_VARS;
     asm volatile (CAPSENSE_READ_ROWS_ASM_INSTRUCTIONS : CAPSENSE_READ_ROWS_OUTPUT_CONSTRAINTS : CAPSENSE_READ_ROWS_INPUT_CONSTRAINTS);
@@ -503,7 +503,7 @@ void tracking_test(void)
 }
 #endif
 
-uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, bool looking_for_all_zero)
+uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, uint8_t non_dead_physical_rows, bool looking_for_all_zero)
 {
     uint16_t min = 0, max = CAPSENSE_DAC_MAX;
     while (min < max)
@@ -525,6 +525,7 @@ uint16_t calibration_measure_all_valid_keys(uint8_t time, uint8_t reps, bool loo
                     valid_physical_rows |= (((matrix_row_t)1) << CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row)); // convert keymap row to physical row
                 }
             }
+            valid_physical_rows &= non_dead_physical_rows;
             uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
             uint8_t i;
             for (i=0;i<reps;i++) {
@@ -566,12 +567,20 @@ uint16_t cal_tr_allzero;
 uint16_t cal_tr_allone;
 void calibration(void)
 {
+    dac_write_threshold(CAPSENSE_DAC_MAX);
+    dac_write_threshold(CAPSENSE_DAC_MAX); // temporary workaround for the delay after writing the DAC being too low for big jumps
+    dac_write_threshold(CAPSENSE_DAC_MAX); // temporary workaround for the delay after writing the DAC being too low for big jumps
+    uint8_t non_dead_physical_rows = ~read_rows();
+    dac_write_threshold(0);
+    dac_write_threshold(0); // temporary workaround for the delay after writing the DAC being too low for big jumps
+    dac_write_threshold(0); // temporary workaround for the delay after writing the DAC being too low for big jumps
+    non_dead_physical_rows &= read_rows();
+    cal_tr_allzero = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true);
+    cal_tr_allone = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false);
     uint16_t cal_thresholds_max[CAPSENSE_CAL_BINS];
     uint16_t cal_thresholds_min[CAPSENSE_CAL_BINS];
     memset(cal_thresholds_max, 0xff, sizeof(cal_thresholds_max));
     memset(cal_thresholds_min, 0xff, sizeof(cal_thresholds_min));
-    cal_tr_allzero = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, true);
-    cal_tr_allone = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, false);
     uint16_t max = (cal_tr_allzero == 0) ? 0 : (cal_tr_allzero - 1);
     uint16_t min = cal_tr_allone + 1;
     if (max < min) max = min;
@@ -580,13 +589,17 @@ void calibration(void)
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
         cal_thresholds[i] = min + (d * (2 * i + 1)) / 2 / CAPSENSE_CAL_BINS;
     }
-    uint8_t col;
-    for (col = 0; col < MATRIX_COLS; col++) {
-        uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
-        uint8_t row;
-        for (row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+    uint8_t row;
+    for (row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+        uint8_t physical_row = CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row);
+        if (!(non_dead_physical_rows & (1 << physical_row))) {
+            continue;
+        }
+        uint8_t col;
+        for (col = 0; col < MATRIX_COLS; col++) {
             if (pgm_read_word(&keymaps[0][row][col]) != KC_NO) {
-                uint16_t threshold = measure_middle(physical_col, CAPSENSE_KEYMAP_ROW_TO_PHYSICAL_ROW(row), CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_EACHKEY_REPS);
+                uint8_t physical_col = CAPSENSE_KEYMAP_COL_TO_PHYSICAL_COL(col);
+                uint16_t threshold = measure_middle(physical_col, physical_row, CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_EACHKEY_REPS);
                 uint8_t besti = 0;
                 uint16_t best_diff = (uint16_t)abs(threshold - cal_thresholds[besti]);
                 for (i=1;i<CAPSENSE_CAL_BINS;i++) {

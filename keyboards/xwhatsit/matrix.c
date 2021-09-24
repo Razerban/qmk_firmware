@@ -681,11 +681,67 @@ void calibration(void)
         cal_thresholds_min[i] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false, &assigned_to_threshold[i][0]);
         cal_thresholds[i] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true, &assigned_to_threshold[i][0]);
     }
+    // First clean up unused bins (move them to the end, pack used bins together)
+    uint8_t unused_bins = 0;
+    for (i=0; i < CAPSENSE_CAL_BINS - unused_bins;) {
+        uint8_t j;
+        for (j=0;j<MATRIX_CAPSENSE_ROWS; j++) {
+            if (assigned_to_threshold[i][j] != 0) {
+                break;
+            }
+        }
+        if (j >= MATRIX_CAPSENSE_ROWS) {
+            for (j=i+1; j < CAPSENSE_CAL_BINS - unused_bins; j++) {
+                copy_bin(j-1, j, cal_thresholds_min);
+            }
+            for (j=0;j<MATRIX_CAPSENSE_ROWS; j++) {
+                assigned_to_threshold[CAPSENSE_CAL_BINS - 1 - unused_bins][j] = 0;
+            }
+            unused_bins ++;
+        } else {
+            i++;
+        }
+    }
+    // And now split the largest used bins.
+    while (unused_bins > 0) {
+        int16_t max_diff = 0;
+        uint8_t bin_to_split = 0;
+        for (i=0; i < CAPSENSE_CAL_BINS - unused_bins; i++) {
+            int16_t diff = cal_thresholds[i] - cal_thresholds_min[i];
+            if (diff > max_diff) {
+                max_diff = diff;
+                bin_to_split = i;
+            }
+        }
+        if (max_diff == 0) break;
+        for (i=CAPSENSE_CAL_BINS - 1 - unused_bins; i>bin_to_split; i--) {
+            copy_bin(i+1, i, cal_thresholds_min);
+        }
+        int16_t mid = (cal_thresholds[bin_to_split] + cal_thresholds_min[bin_to_split])/2;
+        cal_thresholds[bin_to_split+1] = cal_thresholds[bin_to_split];
+        cal_thresholds[bin_to_split] = mid;
+        cal_thresholds_min[bin_to_split+1] = mid + 1;
+
+        // Initialise assignment of upper half to no keys:
+        for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+            assigned_to_threshold[bin_to_split+1][row] = 0;
+        }
+        assign_keys_that_are_high_at_threshold_to_bin(mid, bin_to_split+1, non_dead_physical_rows);
+        for (uint8_t row = 0; row < MATRIX_CAPSENSE_ROWS; row++) {
+            assigned_to_threshold[bin_to_split+1][row] &= assigned_to_threshold[bin_to_split][row]; // Remove keys that are assigned to one of the non-split bins
+            assigned_to_threshold[bin_to_split][row] &= ~assigned_to_threshold[bin_to_split+1][row]; // Remove keys that have been moved to the higher half form the lower half.
+        }
+
+        // Recalculate max of lower half, and min of higher half
+        cal_thresholds_min[bin_to_split+1] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, false, &assigned_to_threshold[bin_to_split+1][0]);
+        cal_thresholds[bin_to_split] = calibration_measure_all_valid_keys(CAPSENSE_HARDCODED_SAMPLE_TIME, CAPSENSE_CAL_INIT_REPS, non_dead_physical_rows, true, &assigned_to_threshold[bin_to_split][0]);
+
+        unused_bins--;
+    }
 
     for (i=0;i<CAPSENSE_CAL_BINS;i++) {
         uint16_t bin_signal_level;
         bin_signal_level = (cal_thresholds[i] + cal_thresholds_min[i]) / 2;
-        //bin_signal_level = (cal_thresholds[i]); // TODO REMOVE
         #ifdef CAPSENSE_CONDUCTIVE_PLASTIC_IS_PUSHED_DOWN_ON_KEYPRESS
         if ((bin_signal_level + CAPSENSE_CAL_THRESHOLD_OFFSET) > CAPSENSE_DAC_MAX)
         {

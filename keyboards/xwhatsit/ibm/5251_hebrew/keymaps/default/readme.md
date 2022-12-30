@@ -1,1 +1,1 @@
-# The default keymap for xwhatsit/ibm/5251/$(CONTROLLER)
+# The default keymap for xwhatsit/ibm/5251_hebrew/$(CONTROLLER)

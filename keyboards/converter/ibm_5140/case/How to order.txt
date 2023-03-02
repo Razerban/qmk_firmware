@@ -1,0 +1,19 @@
+The case is made out of 5 layers:
+- Base layer
+- Middle layer 1
+- Middle layer 2
+- Top layer
+- Pen holder
+
+How to order the different parts of the case:
+1- Base layer: 3mm thickness
+2- Middle layer 1: 6mm thickness
+3- Middle layer 2: 3mm thickness
+4- Top layer: 8mm thickness
+
+NB: The top layer contains two pieces: the top layer and the pen holder.
+
+Screw and spaces:
+1- 9x M3 Aluminum spacers 20mm length (https://a.aliexpress.com/_mOULKUI)
+2- 4x M3 Aluminum spacers 25mm length (https://a.aliexpress.com/_mOULKUI)
+3- 26x M3 Hex screws 10mm length (https://a.aliexpress.com/_mtbwIFG)

@@ -12,8 +12,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/* VIA layer count */
-#define DYNAMIC_KEYMAP_LAYER_COUNT 6
+#pragma once
 
 // If you press a dual-role key, press another key, and then release the
 // dual-role key, all within the tapping term, by default the dual-role key

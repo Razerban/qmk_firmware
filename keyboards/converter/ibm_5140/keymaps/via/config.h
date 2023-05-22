@@ -15,3 +15,10 @@
  */
 
 #pragma once
+
+// If you press a dual-role key, press another key, and then release the
+// dual-role key, all within the tapping term, by default the dual-role key
+// will perform its tap action. If the HOLD_ON_OTHER_KEY_PRESS option is
+// enabled, the dual-role key will perform its hold action instead.
+#define HOLD_ON_OTHER_KEY_PRESS
+

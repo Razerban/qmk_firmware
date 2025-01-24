@@ -7,8 +7,9 @@ CONSOLE_ENABLE    = no                                # Console for debug
 COMMAND_ENABLE    = no                                # Commands for debug and configuration
 
 TAP_DANCE_ENABLE  = yes
+INTROSPECTION_KEYMAP_C = tap_dance.c
 
-SRC += custom_keycodes.c tap_dance.c
+SRC += custom_keycodes.c
 
 ifeq (,$(findstring xwhatsit/, $(strip $(KEYBOARD)))) # Add the EnterBootloader communication protocol only if the firmware isn't XWhatsit's
     RAW_ENABLE    = yes                               # Enable RAW_HID capabilities

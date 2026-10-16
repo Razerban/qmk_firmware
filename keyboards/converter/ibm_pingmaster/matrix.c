@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "util.h"
 #include "ibm4704.h"
 #include "matrix.h"
-#include "ibm_pingmaster.h"
+#include "quantum.h"
 
 
 static void matrix_make(uint8_t code);
